@@ -4,6 +4,7 @@ import type { Prisma } from '@prisma/client';
 import { prisma } from '../../db.js';
 import {
   streamAssistantReply,
+  generateChatTitle,
   isModelId,
   MODELS,
   DEFAULT_MODEL_ID,
@@ -16,6 +17,10 @@ function asMessages(messages: Prisma.JsonValue): ChatMessage[] {
 
 function childPath(parentPath: string, childId: string): string {
   return `${parentPath}/${childId}`;
+}
+
+function toResponse(chat: { chatId: string; path: string; title: string | null; messages: Prisma.JsonValue }) {
+  return { chatId: chat.chatId, path: chat.path, title: chat.title, messages: asMessages(chat.messages) };
 }
 
 async function findOwnedChat(chatId: string, userId: string) {
@@ -40,7 +45,7 @@ export async function createChat(req: Request<{ chatid: string }>, res: Response
   });
 
   if (lastChat && asMessages(lastChat.messages).length === 0) {
-    res.status(200).json({ chatId: lastChat.chatId, path: lastChat.path, messages: asMessages(lastChat.messages) });
+    res.status(200).json(toResponse(lastChat));
     return;
   }
 
@@ -53,7 +58,7 @@ export async function createChat(req: Request<{ chatid: string }>, res: Response
       messages: [] as unknown as Prisma.InputJsonValue,
     },
   });
-  res.status(201).json({ chatId: chat.chatId, path: chat.path, messages: [] });
+  res.status(201).json(toResponse(chat));
 }
 
 // GET /:chatid - return the messages of this chat
@@ -63,7 +68,7 @@ export async function getChat(req: Request<{ chatid: string }>, res: Response) {
     res.status(404).json({ error: 'Chat not found' });
     return;
   }
-  res.json({ chatId: chat.chatId, path: chat.path, messages: asMessages(chat.messages) });
+  res.json(toResponse(chat));
 }
 
 // POST /fork/:chatid - create a new fork branch of the given chat, copying its history. No message, no streaming.
@@ -80,11 +85,12 @@ export async function forkChat(req: Request<{ chatid: string }>, res: Response) 
       chatId: newChatId,
       userId: req.userId!,
       path: childPath(parent.path, newChatId),
+      // Deliberately untitled: a fork is named from its own first message.
       messages: parent.messages as Prisma.InputJsonValue,
     },
   });
 
-  res.status(201).json({ chatId: chat.chatId, path: chat.path, messages: asMessages(chat.messages) });
+  res.status(201).json(toResponse(chat));
 }
 
 // POST /message/:chatid - continue an existing chat, stream the reply, persist once finished
@@ -112,6 +118,18 @@ export async function sendMessage(req: Request<{ chatid: string }>, res: Respons
   const chatId = chat.chatId;
   const history: ChatMessage[] = [...asMessages(chat.messages), { role: 'user', content: message }];
 
+  // Only the first message after creation (or after a fork) names the chat.
+  const title = chat.title === null
+    ? generateChatTitle(message).then(async (generated) => {
+        if (generated) {
+          await prisma.chat
+            .update({ where: { chatId }, data: { title: generated } })
+            .catch((err) => console.error(`Failed to persist title for chat ${chatId}:`, err));
+        }
+        return generated;
+      })
+    : undefined;
+
   streamAssistantReply(history, res, (assistantText) => {
     const finalMessages: ChatMessage[] = [...history, { role: 'assistant', content: assistantText }];
     prisma.chat
@@ -120,7 +138,7 @@ export async function sendMessage(req: Request<{ chatid: string }>, res: Respons
         data: { messages: finalMessages as unknown as Prisma.InputJsonValue },
       })
       .catch((err) => console.error(`Failed to persist message for chat ${chatId}:`, err));
-  }, modelId);
+  }, modelId, title);
 }
 
 // GET /chats/:userid - top-level chats for a user (path is a single segment, e.g. "/uuid")
@@ -131,8 +149,8 @@ export async function listTopLevelChats(req: Request<{ userid: string }>, res: R
   }
 
   const chats = await prisma.$queryRaw<
-    { chatId: string; path: string; messages: unknown }[]
-  >`SELECT "chatId", "path", "messages" FROM "chats" WHERE "userId" = ${req.userId}::uuid AND "path" ~ '^/[^/]+$'`;
+    { chatId: string; path: string; title: string | null; messages: unknown }[]
+  >`SELECT "chatId", "path", "title", "messages" FROM "chats" WHERE "userId" = ${req.userId}::uuid AND "path" ~ '^/[^/]+$'`;
 
   res.json(chats);
 }
@@ -149,7 +167,7 @@ export async function listChildren(req: Request<{ chatid: string }>, res: Respon
     where: { userId: req.userId!, path: { startsWith: `${chat.path}/` } },
   });
 
-  res.json(children.map((c) => ({ chatId: c.chatId, path: c.path, messages: asMessages(c.messages) })));
+  res.json(children.map(toResponse));
 }
 
 // DELETE /:chatid - delete this chat and every fork descending from it

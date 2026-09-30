@@ -28,6 +28,7 @@ vi.mock('../src/llm.js', () => ({
   MODELS: MOCK_MODELS,
   DEFAULT_MODEL_ID: DEFAULT_MOCK_MODEL,
   isModelId: (value: unknown) => MOCK_MODELS.some((m) => m.id === value),
+  generateChatTitle: async (message: string) => `Title: ${message}`,
   streamAssistantReply: (
     history: StubChatMessage[],
     response: ServerResponse,
@@ -90,6 +91,7 @@ describe('chat fork flow', () => {
     expect(res.status).toBe(201);
     expect(res.body.path).toBe(`/${res.body.chatId}`);
     expect(res.body.messages).toEqual([]);
+    expect(res.body.title).toBeNull();
 
     chatId = res.body.chatId;
   });
@@ -123,6 +125,13 @@ describe('chat fork flow', () => {
       { role: 'user', content: 'Say hi in two words.' },
       { role: 'assistant', content: 'mock reply: Say hi in two words.' },
     ]);
+
+    // The first message names the chat.
+    const titled = await waitFor(async () => {
+      const c = await prisma.chat.findUnique({ where: { chatId } });
+      return c?.title ? c : null;
+    });
+    expect(titled.title).toBe('Title: Say hi in two words.');
   });
 
   it('lists the selectable models', async () => {
@@ -151,6 +160,10 @@ describe('chat fork flow', () => {
       const messages = c?.messages as StubChatMessage[] | undefined;
       return messages?.length === 4 ? c : null;
     });
+
+    // Later messages leave the title alone.
+    const row = await prisma.chat.findUnique({ where: { chatId } });
+    expect(row?.title).toBe('Title: Say hi in two words.');
   });
 
   it('rejects an unknown model without calling the LLM', async () => {
@@ -170,6 +183,8 @@ describe('chat fork flow', () => {
     expect(res.status).toBe(201);
     forkChatId = res.body.chatId;
     expect(res.body.path).toBe(`/${chatId}/${forkChatId}`);
+    // A fork is untitled until its own first message.
+    expect(res.body.title).toBeNull();
     expect(res.body.messages).toEqual([
       { role: 'user', content: 'Say hi in two words.' },
       { role: 'assistant', content: 'mock reply: Say hi in two words.' },
@@ -195,6 +210,12 @@ describe('chat fork flow', () => {
       const messages = c?.messages as StubChatMessage[] | undefined;
       return messages?.length === 6 ? c : null;
     });
+
+    const forkTitled = await waitFor(async () => {
+      const c = await prisma.chat.findUnique({ where: { chatId: forkChatId } });
+      return c?.title ? c : null;
+    });
+    expect(forkTitled.title).toBe('Title: Now say goodbye in two words.');
 
     expect(forked.messages).toEqual([
       { role: 'user', content: 'Say hi in two words.' },

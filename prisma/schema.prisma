@@ -37,6 +37,8 @@ model Chat {
   userId    String   @db.Uuid
   chatId    String   @id @default(uuid()) @db.Uuid
   path      String
+  // Null until the first message names the chat (LLM-generated).
+  title     String?
   messages  Json
   createdAt DateTime @default(now())
 
