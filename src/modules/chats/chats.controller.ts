@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, Response } from 'express';
 import type { Prisma } from '@prisma/client';
+import { waitUntil } from '@vercel/functions';
 import { prisma } from '../../db.js';
 import {
   streamAssistantReply,
@@ -132,12 +133,15 @@ export async function sendMessage(req: Request<{ chatid: string }>, res: Respons
 
   streamAssistantReply(history, res, (assistantText) => {
     const finalMessages: ChatMessage[] = [...history, { role: 'assistant', content: assistantText }];
-    prisma.chat
-      .update({
-        where: { chatId },
-        data: { messages: finalMessages as unknown as Prisma.InputJsonValue },
-      })
-      .catch((err) => console.error(`Failed to persist message for chat ${chatId}:`, err));
+    // waitUntil keeps the serverless instance alive for the write after the response ends.
+    waitUntil(
+      prisma.chat
+        .update({
+          where: { chatId },
+          data: { messages: finalMessages as unknown as Prisma.InputJsonValue },
+        })
+        .catch((err) => console.error(`Failed to persist message for chat ${chatId}:`, err)),
+    );
   }, modelId, title);
 }
 

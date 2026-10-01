@@ -5,7 +5,7 @@ import { chatsRouter } from './modules/chats/chats.routes.js';
 import { authenticate } from './middleware/auth.js';
 
 export const app = express();
-app.use(cors({ origin: 'http://localhost:3005' }));
+app.use(cors({ origin: process.env.FRONTEND_URL ?? 'http://localhost:3005' }));
 app.use(express.json());
 
 app.use('/auth', authRouter);

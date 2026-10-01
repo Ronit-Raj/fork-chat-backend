@@ -32,7 +32,7 @@ export const MODELS = [
 
 export type ModelId = (typeof MODELS)[number]['id'];
 
-export const DEFAULT_MODEL_ID: ModelId = 'gemini-3.5-flash';
+export const DEFAULT_MODEL_ID: ModelId = 'gemini-3.5-flash-lite';
 
 export function isModelId(value: unknown): value is ModelId {
   return typeof value === 'string' && MODELS.some((model) => model.id === value);
