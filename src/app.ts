@@ -1,3 +1,4 @@
+/// <reference path="./types/express.d.ts" />
 import cors from 'cors';
 import express, { type ErrorRequestHandler } from 'express';
 import { authRouter } from './modules/auth/auth.routes.js';
@@ -18,3 +19,5 @@ const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
   }
 };
 app.use(errorHandler);
+
+export default app;
