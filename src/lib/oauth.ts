@@ -31,6 +31,7 @@ export type OAuthProviderName = 'google' | 'github';
 export interface OAuthProfile {
   providerAccountId: string;
   email: string;
+  name: string | null;
 }
 
 interface OAuthProviderConfig {
@@ -119,7 +120,7 @@ async function fetchGoogleProfile(accessToken: string): Promise<OAuthProfile> {
     throw new Error(`Google profile fetch failed: ${res.status} ${await res.text()}`);
   }
 
-  const body = (await res.json()) as { sub?: string; email?: string; email_verified?: boolean };
+  const body = (await res.json()) as { sub?: string; email?: string; email_verified?: boolean; name?: string };
   if (!body.sub || !body.email) {
     throw new Error('Google profile response missing sub/email');
   }
@@ -127,7 +128,7 @@ async function fetchGoogleProfile(accessToken: string): Promise<OAuthProfile> {
     throw new Error('Google account email is not verified');
   }
 
-  return { providerAccountId: body.sub, email: body.email };
+  return { providerAccountId: body.sub, email: body.email, name: body.name ?? null };
 }
 
 async function exchangeGithubCode(code: string, config: OAuthProviderConfig): Promise<string> {
@@ -167,16 +168,19 @@ async function fetchGithubProfile(accessToken: string): Promise<OAuthProfile> {
   if (!userRes.ok) {
     throw new Error(`GitHub user fetch failed: ${userRes.status} ${await userRes.text()}`);
   }
-  const user = (await userRes.json()) as { id?: number; email?: string | null };
+  const user = (await userRes.json()) as { id?: number; email?: string | null; name?: string | null; login?: string };
   if (!user.id) {
     throw new Error('GitHub user response missing id');
   }
+  // Prefer the display name; fall back to the username when the user never
+  // set a public name.
+  const name = user.name ?? user.login ?? null;
 
   // GitHub only returns `email` on /user when the user has made it public;
   // otherwise it's null and the verified primary address has to be looked up
   // separately.
   if (user.email) {
-    return { providerAccountId: String(user.id), email: user.email };
+    return { providerAccountId: String(user.id), email: user.email, name };
   }
 
   const emailsRes = await fetch('https://api.github.com/user/emails', { headers });
@@ -193,7 +197,7 @@ async function fetchGithubProfile(accessToken: string): Promise<OAuthProfile> {
     throw new Error('GitHub account has no verified primary email');
   }
 
-  return { providerAccountId: String(user.id), email: primary.email };
+  return { providerAccountId: String(user.id), email: primary.email, name };
 }
 
 export async function exchangeCodeForProfile(

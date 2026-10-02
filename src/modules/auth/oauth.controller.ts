@@ -51,7 +51,7 @@ export function handleProviderCallback(provider: OAuthProviderName) {
         (await prisma.user.upsert({
           where: { email: profile.email },
           update: {},
-          create: { email: profile.email },
+          create: { email: profile.email, name: profile.name },
         }));
 
       if (!existingAccount) {
@@ -64,7 +64,18 @@ export function handleProviderCallback(provider: OAuthProviderName) {
         });
       }
 
-      const token = signToken({ userId: user.id, email: user.email });
+      // Backfill the display name for accounts created before names were
+      // kept. Never overwrites a name the user already has.
+      let displayName = user.name;
+      if (!displayName && profile.name) {
+        const updated = await prisma.user.update({
+          where: { id: user.id },
+          data: { name: profile.name },
+        });
+        displayName = updated.name;
+      }
+
+      const token = signToken({ userId: user.id, email: user.email, name: displayName });
       res.redirect(`${frontendUrl}/callback?token=${encodeURIComponent(token)}`);
     } catch (err) {
       console.error(`${provider} OAuth callback failed:`, err);

@@ -11,6 +11,9 @@ model User {
   id           String   @id @default(uuid()) @db.Uuid
   email        String   @unique
   passwordHash String?
+  // Display name from OAuth (Google/GitHub profile). Null for
+  // password-only accounts until the user sets one.
+  name         String?
   createdAt    DateTime @default(now())
 
   chats         Chat[]
